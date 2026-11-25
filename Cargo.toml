@@ -1,0 +1,29 @@
+[package]
+name = "bevy_save_state"
+version = "0.1.0"
+edition = "2024"
+description = "Emulator-style savestates for testing and debugging a Bevy game."
+publish = false
+
+[dependencies]
+bevy = { version = "0.20.1", default-features = false, features = [
+    "std",
+    "debug",
+    "bevy_log",
+    "bevy_state",
+    "bevy_world_serialization",
+    "keyboard",
+    "serialize",
+] }
+ron = { version = "0.12", features = ["integer128"] }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+bevy = "0.20.1"
+rand = { version = "0.10.4", features = ["chacha"] }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
