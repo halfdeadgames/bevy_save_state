@@ -9,7 +9,7 @@ use bevy::{
 use rand::{Rng, SeedableRng, rngs::ChaCha8Rng};
 
 use crate::{
-    SaveStateAppExt, SaveStateError, SaveStatePlugin, Saved,
+    RebuiltChild, SaveStateAppExt, SaveStateError, SaveStatePlugin, Saved,
     file_format::{join_header_and_world, split_header_and_world},
     fingerprint::fingerprint_of_roots,
     load_world_from_str, save_world_to_string, unclassified_component_names,
@@ -233,6 +233,7 @@ fn non_saved_children_are_dropped_and_saves_stay_identical() {
     let parent = world.spawn((Saved, Marker(1))).id();
     world.spawn((Saved, Marker(2), ChildOf(parent)));
     world.spawn((Visual, ChildOf(parent)));
+    world.spawn((Visual, RebuiltChild, ChildOf(parent)));
     let first = save_world_to_string(world).unwrap();
     assert_eq!(first, save_world_to_string(world).unwrap());
 

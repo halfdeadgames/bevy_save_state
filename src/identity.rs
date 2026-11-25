@@ -11,6 +11,14 @@ use bevy::{ecs::entity_disabling::Disabled, prelude::*};
 #[reflect(Component, Default)]
 pub struct Saved;
 
+/// Marks a non-[`Saved`] child that the game's own observers recreate after a load.
+///
+/// Saves drop the hierarchy link to every non-`Saved` child. Children with this marker are
+/// dropped quietly (a debug log), while any other dropped child is reported with a warning, so a
+/// forgotten `Saved` marker stays visible.
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RebuiltChild;
+
 /// Stable identity of a [`Saved`] entity, used to order entities in the file.
 ///
 /// Bevy hands out new `Entity` ids after every load, so the file is sorted by this id instead.

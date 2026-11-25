@@ -29,7 +29,7 @@ use bevy::{
 pub use driver_systems::{load_state_system, save_state_system};
 pub use error::SaveStateError;
 pub use file_format::{CURRENT_FORMAT_VERSION, SaveHeader};
-pub use identity::{NextSaveId, SaveId, Saved};
+pub use identity::{NextSaveId, RebuiltChild, SaveId, Saved};
 pub use quick_keys::{QUICK_SAVE_FILE_NAME, QuickSaveKeyBindings, QuickSaveKeysPlugin};
 pub use registration::{SaveStateAppExt, SavedTypes};
 pub use snapshot::{

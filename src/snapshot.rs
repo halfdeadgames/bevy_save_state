@@ -14,7 +14,7 @@ use bevy::{
         reflect::{AppTypeRegistry, ReflectComponent, ReflectResource},
         relationship::RelationshipTarget,
     },
-    log::warn,
+    log::{debug, warn},
     prelude::*,
     reflect::{PartialReflect, TypeData, TypeRegistration, TypeRegistry},
     world_serialization::{
@@ -29,7 +29,7 @@ use crate::{
         CURRENT_FORMAT_VERSION, SaveHeader, join_header_and_world, split_header_and_world,
     },
     fingerprint::compute_schema_fingerprint,
-    identity::{SaveId, Saved},
+    identity::{RebuiltChild, SaveId, Saved},
     registration::SavedTypes,
     unclassified::warn_about_unclassified_components,
 };
@@ -54,7 +54,8 @@ impl LoadFromPath for PlaceholderHandleLoader {
 /// resources in type path order, so saving, loading, and saving again gives identical text, even
 /// across processes. Disabled entities are included. Only hierarchy between `Saved` entities is
 /// kept: a `ChildOf` whose parent is not `Saved` is dropped, and `Children` lists only `Saved`
-/// children. Logs one warning when unclassified components exist or relationships were dropped.
+/// children. Logs one warning when unclassified components exist, and one when relationships were
+/// dropped; dropped children marked [`RebuiltChild`] only get a debug log.
 ///
 /// # Errors
 /// Fails when the plugin is missing, a saved entity has no `SaveId`, or serialization fails.
@@ -63,9 +64,16 @@ pub fn save_world_to_string(world: &mut World) -> Result<String, SaveStateError>
     let app_registry = required_resource::<AppTypeRegistry>(world)?.clone();
     warn_about_unclassified_components(world, &saved_types);
     let ordered_entities = collect_saved_entities_in_save_id_order(world)?;
+    let rebuilt_children = collect_rebuilt_children(world);
     let registry = app_registry.read();
 
-    let extracted = extract_in_save_id_order(world, &registry, &saved_types, &ordered_entities);
+    let extracted = extract_in_save_id_order(
+        world,
+        &registry,
+        &saved_types,
+        &ordered_entities,
+        &rebuilt_children,
+    );
     let mut canonical = rebuild_with_sequential_entities(&extracted, &registry, &saved_types)?;
     // Extraction order follows component ids, which differ between processes.
     sort_by_type_path(&mut canonical);
@@ -169,6 +177,11 @@ fn collect_saved_entities_in_save_id_order(
     Ok(ordered)
 }
 
+fn collect_rebuilt_children(world: &mut World) -> HashSet<Entity> {
+    let mut query = world.query_filtered::<Entity, (With<RebuiltChild>, Allow<Disabled>)>();
+    query.iter(world).collect()
+}
+
 fn allow_only(type_ids: &BTreeSet<TypeId>) -> WorldFilter {
     type_ids
         .iter()
@@ -196,6 +209,7 @@ fn extract_in_save_id_order(
     registry: &TypeRegistry,
     saved_types: &SavedTypes,
     ordered_entities: &[(Entity, SaveId)],
+    rebuilt_children: &HashSet<Entity>,
 ) -> DynamicWorld {
     let entities = ordered_entities.iter().map(|(entity, _)| *entity);
     let mut extracted = extract_saved_types(world, registry, saved_types, entities);
@@ -204,7 +218,7 @@ fn extract_in_save_id_order(
     extracted
         .entities
         .sort_by_key(|dynamic_entity| save_ids.get(&dynamic_entity.entity).copied());
-    keep_only_saved_relationships(&mut extracted);
+    keep_only_saved_relationships(&mut extracted, rebuilt_children);
     sort_by_type_path(&mut extracted);
     extracted
 }
@@ -224,12 +238,40 @@ fn sort_by_type_path(dynamic_world: &mut DynamicWorld) {
 #[derive(Default)]
 struct DroppedRelationships {
     child_of_components: usize,
-    children_entries: usize,
+    unexpected_children_entries: usize,
+    rebuilt_children_entries: usize,
+}
+
+impl DroppedRelationships {
+    fn count_dropped_child(&mut self, child: Entity, rebuilt_children: &HashSet<Entity>) {
+        if rebuilt_children.contains(&child) {
+            self.rebuilt_children_entries += 1;
+        } else {
+            self.unexpected_children_entries += 1;
+        }
+    }
+
+    fn log(&self) {
+        if self.child_of_components > 0 || self.unexpected_children_entries > 0 {
+            warn!(
+                "dropped {} ChildOf components and {} Children entries that point at entities \
+                 that are not Saved; only Saved-to-Saved hierarchy is kept (mark children that \
+                 observers rebuild with RebuiltChild)",
+                self.child_of_components, self.unexpected_children_entries
+            );
+        }
+        if self.rebuilt_children_entries > 0 {
+            debug!(
+                "dropped {} Children entries that point at RebuiltChild entities",
+                self.rebuilt_children_entries
+            );
+        }
+    }
 }
 
 /// Removes hierarchy links that point at entities outside the save, because their ids would be
 /// dead after a load. Only `Saved`-to-`Saved` hierarchy survives.
-fn keep_only_saved_relationships(extracted: &mut DynamicWorld) {
+fn keep_only_saved_relationships(extracted: &mut DynamicWorld, rebuilt_children: &HashSet<Entity>) {
     let saved: HashSet<Entity> = extracted
         .entities
         .iter()
@@ -237,22 +279,17 @@ fn keep_only_saved_relationships(extracted: &mut DynamicWorld) {
         .collect();
     let mut dropped = DroppedRelationships::default();
     for dynamic_entity in &mut extracted.entities {
-        dynamic_entity
-            .components
-            .retain_mut(|component| keep_component(&mut **component, &saved, &mut dropped));
+        dynamic_entity.components.retain_mut(|component| {
+            keep_component(&mut **component, &saved, rebuilt_children, &mut dropped)
+        });
     }
-    if dropped.child_of_components > 0 || dropped.children_entries > 0 {
-        warn!(
-            "dropped {} ChildOf components and {} Children entries that point at entities that \
-             are not Saved; only Saved-to-Saved hierarchy is kept",
-            dropped.child_of_components, dropped.children_entries
-        );
-    }
+    dropped.log();
 }
 
 fn keep_component(
     component: &mut dyn PartialReflect,
     saved: &HashSet<Entity>,
+    rebuilt_children: &HashSet<Entity>,
     dropped: &mut DroppedRelationships,
 ) -> bool {
     if let Some(child_of) = component.try_downcast_ref::<ChildOf>() {
@@ -263,13 +300,14 @@ fn keep_component(
         return parent_is_saved;
     }
     if let Some(children) = component.try_downcast_mut::<Children>() {
-        let before = children.len();
-        children
-            .collection_mut_risky()
-            .retain(|child| saved.contains(child));
-        let remaining = children.len();
-        dropped.children_entries += before - remaining;
-        return remaining > 0;
+        children.collection_mut_risky().retain(|child| {
+            let child_is_saved = saved.contains(child);
+            if !child_is_saved {
+                dropped.count_dropped_child(*child, rebuilt_children);
+            }
+            child_is_saved
+        });
+        return !children.is_empty();
     }
     true
 }
@@ -392,5 +430,33 @@ fn despawn_every_saved_entity(world: &mut World) {
         if world.get_entity(entity).is_ok() {
             world.despawn(entity);
         }
+    }
+}
+
+#[cfg(test)]
+mod dropped_relationship_tests {
+    use bevy::ecs::relationship::RelationshipTarget;
+
+    use super::*;
+
+    #[test]
+    fn dropped_rebuilt_children_are_counted_apart_from_unexpected_ones() {
+        let mut world = World::new();
+        let saved_child = world.spawn_empty().id();
+        let rebuilt_child = world.spawn_empty().id();
+        let forgotten_child = world.spawn_empty().id();
+        let saved = HashSet::from([saved_child]);
+        let rebuilt_children = HashSet::from([rebuilt_child]);
+        let mut children =
+            Children::from_collection_risky(vec![saved_child, rebuilt_child, forgotten_child]);
+        let mut dropped = DroppedRelationships::default();
+
+        let kept = keep_component(&mut children, &saved, &rebuilt_children, &mut dropped);
+
+        assert!(kept);
+        assert_eq!(&*children, &[saved_child]);
+        assert_eq!(dropped.rebuilt_children_entries, 1);
+        assert_eq!(dropped.unexpected_children_entries, 1);
+        assert_eq!(dropped.child_of_components, 0);
     }
 }

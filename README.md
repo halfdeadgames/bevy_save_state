@@ -45,7 +45,10 @@ saved states back directly, so `OnEnter` and `OnExit` systems do not run.
 `Disabled` is saved by default, so disabled entities come back disabled. `Children` is saved by
 default because loading skips relationship hooks. Only `Saved`-to-`Saved` hierarchy is kept: a
 `ChildOf` whose parent is not `Saved` is dropped and `Children` lists only `Saved` children, with
-one warning naming how many links were dropped.
+one warning naming how many links were dropped. Put the `RebuiltChild` marker on non-`Saved`
+children that your observers recreate after a load (such as drawn layers): links to them are
+dropped quietly, with only a debug log, so the warning shows only children that may have been
+meant to be `Saved`.
 
 Saves and loads queued from `QuickSaveKeysPlugin` keys run at the next command sync point, not at
 a moment you choose.
