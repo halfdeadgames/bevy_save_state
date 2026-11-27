@@ -89,3 +89,9 @@ and it follows every field, list, map, set, and array element type to cover nest
 Add, remove, rename, or retype a saved field and the fingerprint changes, so old saves fail with
 `SchemaMismatch` and must be remade. A changed file layout fails with `FormatVersionMismatch`.
 A bad or mismatched file is rejected before the world is touched.
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT), at your option, the same as Bevy.
+
+Unless you explicitly state otherwise, any contribution you intentionally submit for inclusion in this work, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
