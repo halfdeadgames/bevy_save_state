@@ -9,8 +9,6 @@ use bevy::{
     asset::{AssetPath, LoadFromPath, UntypedHandle},
     ecs::{
         entity::EntityHashMap,
-        entity_disabling::Disabled,
-        query::Allow,
         reflect::{AppTypeRegistry, ReflectComponent, ReflectResource},
         relationship::RelationshipTarget,
     },
@@ -29,7 +27,7 @@ use crate::{
         CURRENT_FORMAT_VERSION, SaveHeader, join_header_and_world, split_header_and_world,
     },
     fingerprint::compute_schema_fingerprint,
-    identity::{RebuiltChild, SaveId, Saved},
+    identity::{RebuiltChild, SaveId, Saved, entities_with_marker},
     registration::SavedTypes,
     unclassified::warn_about_unclassified_components,
 };
@@ -52,7 +50,8 @@ impl LoadFromPath for PlaceholderHandleLoader {
 ///
 /// Entities are written in `SaveId` order with sequential entity ids, and components and
 /// resources in type path order, so saving, loading, and saving again gives identical text, even
-/// across processes. Disabled entities are included. Only hierarchy between `Saved` entities is
+/// across processes. Entities hidden by `Disabled` or by a disabling component the game
+/// registered are included. Only hierarchy between `Saved` entities is
 /// kept: a `ChildOf` whose parent is not `Saved` is dropped, and `Children` lists only `Saved`
 /// children. Logs one warning when unclassified components exist, and one when relationships were
 /// dropped; dropped children marked [`RebuiltChild`] only get a debug log.
@@ -166,22 +165,25 @@ fn required_resource<ResourceType: Resource>(
 }
 
 fn collect_saved_entities_in_save_id_order(
-    world: &mut World,
+    world: &World,
 ) -> Result<Vec<(Entity, SaveId)>, SaveStateError> {
-    let mut query =
-        world.query_filtered::<(Entity, Option<&SaveId>), (With<Saved>, Allow<Disabled>)>();
-    let mut ordered = Vec::new();
-    for (entity, save_id) in query.iter(world) {
-        let save_id = save_id.ok_or(SaveStateError::EntityWithoutSaveId { entity })?;
-        ordered.push((entity, *save_id));
-    }
+    let mut ordered = entities_with_marker::<Saved>(world)
+        .into_iter()
+        .map(|entity| {
+            world
+                .get::<SaveId>(entity)
+                .map(|save_id| (entity, *save_id))
+                .ok_or(SaveStateError::EntityWithoutSaveId { entity })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     ordered.sort_by_key(|(_, save_id)| *save_id);
     Ok(ordered)
 }
 
-fn collect_rebuilt_children(world: &mut World) -> HashSet<Entity> {
-    let mut query = world.query_filtered::<Entity, (With<RebuiltChild>, Allow<Disabled>)>();
-    query.iter(world).collect()
+fn collect_rebuilt_children(world: &World) -> HashSet<Entity> {
+    entities_with_marker::<RebuiltChild>(world)
+        .into_iter()
+        .collect()
 }
 
 fn allow_only(type_ids: &BTreeSet<TypeId>) -> WorldFilter {
@@ -425,11 +427,7 @@ fn remove_saved_resources_missing_from_file(
 }
 
 fn despawn_every_saved_entity(world: &mut World) {
-    let saved_entities: Vec<Entity> = world
-        .query_filtered::<Entity, (With<Saved>, Allow<Disabled>)>()
-        .iter(world)
-        .collect();
-    for entity in saved_entities {
+    for entity in entities_with_marker::<Saved>(world) {
         // Despawning a parent already removed its Saved descendants, so some are gone by now.
         if world.get_entity(entity).is_ok() {
             world.despawn(entity);

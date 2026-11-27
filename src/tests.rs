@@ -75,6 +75,11 @@ struct RandomStream {
 #[derive(Component)]
 struct Visual;
 
+/// A game-defined disabling component, like a prefab template kept hidden in the world.
+#[derive(Component, Reflect, Default, Clone, Copy, Debug)]
+#[reflect(Component, Default)]
+struct Prefab;
+
 #[derive(States, Reflect, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 enum Phase {
     #[default]
@@ -200,6 +205,31 @@ fn disabled_saved_entities_come_back_disabled_without_duplicates() {
     let mut markers = world.query_filtered::<(&Marker, Has<Disabled>), Allow<Disabled>>();
     let found: Vec<_> = markers.iter(world).collect();
     assert_eq!(found, vec![(&Marker(3), true)]);
+    assert_eq!(first, save_world_to_string(world).unwrap());
+}
+
+#[test]
+fn entities_hidden_by_a_custom_disabling_component_are_saved_and_replaced_on_load() {
+    let mut app = saved_test_app();
+    app.register_disabling_component::<Prefab>();
+    app.register_saved_component::<Prefab>();
+    let world = app.world_mut();
+    world.spawn((Saved, Marker(1)));
+    world.spawn((Saved, Marker(7), Prefab));
+    let first = save_world_to_string(world).unwrap();
+    assert!(first.contains("Prefab"));
+
+    world.spawn((Saved, Marker(9), Prefab));
+    load_world_from_string(world, &first).unwrap();
+
+    let mut visible_markers = world.query::<&Marker>();
+    let visible: Vec<_> = visible_markers.iter(world).collect();
+    assert_eq!(visible, vec![&Marker(1)]);
+    let mut all_markers = world.query_filtered::<(&Marker, Has<Prefab>), Allow<Prefab>>();
+    let mut found: Vec<_> = all_markers.iter(world).collect();
+    found.sort_by_key(|(marker, _)| marker.0);
+    assert_eq!(found, vec![(&Marker(1), false), (&Marker(7), true)]);
+    // Matching text means the hidden entity also kept the SaveId written in the file.
     assert_eq!(first, save_world_to_string(world).unwrap());
 }
 

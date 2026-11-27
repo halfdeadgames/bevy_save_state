@@ -36,13 +36,16 @@ Saving logs one warning listing components on `Saved` entities that are neither 
 rebuilt (`unclassified_component_names` returns the same list). Saving still succeeds.
 
 Loading first checks everything that could fail (types in the file, `NextState` for each saved
-state), so a failure leaves the world untouched. Then it despawns every `Saved` entity, disabled
+state), so a failure leaves the world untouched. Then it despawns every `Saved` entity, hidden
 ones included, together with all of its descendants, whether or not they are `Saved`. Non-`Saved`
 children such as visual children are not restored, so rebuild them with observers. It writes the
 saved entities and resources, removes saved resources that are absent from the file, and writes
 saved states back directly, so `OnEnter` and `OnExit` systems do not run.
 
-`Disabled` is saved by default, so disabled entities come back disabled. `Children` is saved by
+`Disabled` is saved by default, so disabled entities come back disabled. Entities hidden by a
+disabling component your game registers (`register_disabling_component`) are also saved and
+despawned on load. Register that component with `register_saved_component` so those entities come
+back hidden. Until you do, the save warning lists it as unclassified. `Children` is saved by
 default because loading skips relationship hooks. Only `Saved`-to-`Saved` hierarchy is kept: a
 `ChildOf` whose parent is not `Saved` is dropped and `Children` lists only `Saved` children, with
 one warning naming how many links were dropped. Put the `RebuiltChild` marker on non-`Saved`
