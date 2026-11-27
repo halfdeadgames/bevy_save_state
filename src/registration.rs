@@ -16,7 +16,7 @@ use crate::error::SaveStateError;
 /// is erased once it is registered.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SavedStateHooks {
-    /// Fails when `NextState<S>` is missing, so a load can be refused before the world changes.
+    /// Fails when the `NextState` resource of the registered state type is missing, so a load can be refused before the world changes.
     pub(crate) check_next_state_exists: fn(&World) -> Result<(), SaveStateError>,
     /// Puts a restored state machine back to "no transition pending" after a load.
     pub(crate) reset_pending_transition: fn(&mut World) -> Result<(), SaveStateError>,
@@ -42,109 +42,112 @@ impl SavedTypes {
 
 /// Registration methods that tell the savestate system which game types matter.
 pub trait SaveStateAppExt {
-    /// Saves component `T` on every [`Saved`](crate::Saved) entity that has it.
+    /// Saves component `ComponentType` on every [`Saved`](crate::Saved) entity that has it.
     ///
     /// Registers the type in the type registry and guarantees its `ReflectComponent` data.
-    fn register_saved_component<T>(&mut self) -> &mut Self
+    fn register_saved_component<ComponentType>(&mut self) -> &mut Self
     where
-        T: Component + Reflect + TypePath + GetTypeRegistration;
+        ComponentType: Component + Reflect + TypePath + GetTypeRegistration;
 
-    /// Saves resource `R` and writes it back on load.
+    /// Saves resource `ResourceType` and writes it back on load.
     ///
     /// Registers the type in the type registry and guarantees its `ReflectResource` data.
-    fn register_saved_resource<R>(&mut self) -> &mut Self
+    fn register_saved_resource<ResourceType>(&mut self) -> &mut Self
     where
-        R: Resource + Reflect + FromReflect + TypePath + GetTypeRegistration;
+        ResourceType: Resource + Reflect + FromReflect + TypePath + GetTypeRegistration;
 
-    /// Saves the current value of state machine `S`.
+    /// Saves the current value of state machine `StateType`.
     ///
-    /// On load the `State<S>` value is written back directly and `NextState<S>` is reset, so
-    /// `OnEnter` and `OnExit` systems do not run. The state machine must already be initialized.
-    fn register_saved_state<S>(&mut self) -> &mut Self
+    /// On load the `State<StateType>` value is written back directly and `NextState<StateType>` is
+    /// reset, so `OnEnter` and `OnExit` systems do not run. The state machine must already be
+    /// initialized.
+    fn register_saved_state<StateType>(&mut self) -> &mut Self
     where
-        S: FreelyMutableState,
-        State<S>: Resource + Reflect + FromReflect + TypePath + GetTypeRegistration;
+        StateType: FreelyMutableState,
+        State<StateType>: Resource + Reflect + FromReflect + TypePath + GetTypeRegistration;
 
-    /// Declares component `T` as derived or visual: never saved, recreated by the game's own
+    /// Declares component `ComponentType` as derived or visual: never saved, recreated by the game's own
     /// observers after a load. Only the unclassified check reads this.
-    fn register_rebuilt_component<T: Component>(&mut self) -> &mut Self;
+    fn register_rebuilt_component<ComponentType: Component>(&mut self) -> &mut Self;
 }
 
 impl SaveStateAppExt for App {
-    fn register_saved_component<T>(&mut self) -> &mut Self
+    fn register_saved_component<ComponentType>(&mut self) -> &mut Self
     where
-        T: Component + Reflect + TypePath + GetTypeRegistration,
+        ComponentType: Component + Reflect + TypePath + GetTypeRegistration,
     {
-        self.register_type::<T>();
-        self.register_type_data::<T, ReflectComponent>();
+        self.register_type::<ComponentType>();
+        self.register_type_data::<ComponentType, ReflectComponent>();
         self.init_resource::<SavedTypes>();
         self.world_mut()
             .resource_mut::<SavedTypes>()
             .components
-            .insert(TypeId::of::<T>());
+            .insert(TypeId::of::<ComponentType>());
         self
     }
 
-    fn register_saved_resource<R>(&mut self) -> &mut Self
+    fn register_saved_resource<ResourceType>(&mut self) -> &mut Self
     where
-        R: Resource + Reflect + FromReflect + TypePath + GetTypeRegistration,
+        ResourceType: Resource + Reflect + FromReflect + TypePath + GetTypeRegistration,
     {
-        self.register_type::<R>();
-        self.register_type_data::<R, ReflectResource>();
+        self.register_type::<ResourceType>();
+        self.register_type_data::<ResourceType, ReflectResource>();
         self.init_resource::<SavedTypes>();
         self.world_mut()
             .resource_mut::<SavedTypes>()
             .resources
-            .insert(TypeId::of::<R>());
+            .insert(TypeId::of::<ResourceType>());
         self
     }
 
-    fn register_saved_state<S>(&mut self) -> &mut Self
+    fn register_saved_state<StateType>(&mut self) -> &mut Self
     where
-        S: FreelyMutableState,
-        State<S>: Resource + Reflect + FromReflect + TypePath + GetTypeRegistration,
+        StateType: FreelyMutableState,
+        State<StateType>: Resource + Reflect + FromReflect + TypePath + GetTypeRegistration,
     {
-        self.register_saved_resource::<State<S>>();
+        self.register_saved_resource::<State<StateType>>();
         let hooks = SavedStateHooks {
-            check_next_state_exists: check_next_state_exists::<S>,
-            reset_pending_transition: reset_pending_transition::<S>,
+            check_next_state_exists: check_next_state_exists::<StateType>,
+            reset_pending_transition: reset_pending_transition::<StateType>,
         };
         self.world_mut()
             .resource_mut::<SavedTypes>()
             .saved_states
-            .insert(TypeId::of::<State<S>>(), hooks);
+            .insert(TypeId::of::<State<StateType>>(), hooks);
         self
     }
 
-    fn register_rebuilt_component<T: Component>(&mut self) -> &mut Self {
+    fn register_rebuilt_component<ComponentType: Component>(&mut self) -> &mut Self {
         self.init_resource::<SavedTypes>();
         self.world_mut()
             .resource_mut::<SavedTypes>()
             .rebuilt_components
-            .insert(TypeId::of::<T>());
+            .insert(TypeId::of::<ComponentType>());
         self
     }
 }
 
-fn missing_next_state<S: FreelyMutableState>() -> SaveStateError {
+fn missing_next_state<StateType: FreelyMutableState>() -> SaveStateError {
     SaveStateError::MissingResource {
-        resource_name: type_name::<NextState<S>>(),
+        resource_name: type_name::<NextState<StateType>>(),
     }
 }
 
-fn check_next_state_exists<S: FreelyMutableState>(world: &World) -> Result<(), SaveStateError> {
+fn check_next_state_exists<StateType: FreelyMutableState>(
+    world: &World,
+) -> Result<(), SaveStateError> {
     world
-        .get_resource::<NextState<S>>()
+        .get_resource::<NextState<StateType>>()
         .map(|_| ())
-        .ok_or_else(missing_next_state::<S>)
+        .ok_or_else(missing_next_state::<StateType>)
 }
 
-fn reset_pending_transition<S: FreelyMutableState>(
+fn reset_pending_transition<StateType: FreelyMutableState>(
     world: &mut World,
 ) -> Result<(), SaveStateError> {
     let mut next_state = world
-        .get_resource_mut::<NextState<S>>()
-        .ok_or_else(missing_next_state::<S>)?;
+        .get_resource_mut::<NextState<StateType>>()
+        .ok_or_else(missing_next_state::<StateType>)?;
     next_state.reset();
     Ok(())
 }

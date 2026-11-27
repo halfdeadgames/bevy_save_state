@@ -33,7 +33,7 @@ pub use identity::{NextSaveId, RebuiltChild, SaveId, Saved};
 pub use quick_keys::{QUICK_SAVE_FILE_NAME, QuickSaveKeyBindings, QuickSaveKeysPlugin};
 pub use registration::{SaveStateAppExt, SavedTypes};
 pub use snapshot::{
-    load_world_from_file, load_world_from_str, save_world_to_file, save_world_to_string,
+    load_world_from_file, load_world_from_string, save_world_to_file, save_world_to_string,
 };
 pub use unclassified::unclassified_component_names;
 

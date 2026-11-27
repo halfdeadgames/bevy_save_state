@@ -12,7 +12,7 @@ use crate::{
     RebuiltChild, SaveStateAppExt, SaveStateError, SaveStatePlugin, Saved,
     file_format::{join_header_and_world, split_header_and_world},
     fingerprint::fingerprint_of_roots,
-    load_world_from_str, save_world_to_string, unclassified_component_names,
+    load_world_from_string, save_world_to_string, unclassified_component_names,
 };
 
 /// Two layouts share every type path and differ only in the type of a nested field.
@@ -95,11 +95,11 @@ fn saved_test_app() -> App {
 }
 
 fn draw_number_into_total(mut stream: ResMut<RandomStream>, mut total: ResMut<Total>) {
-    let mut rng = ChaCha8Rng::seed_from_u64(stream.seed);
-    rng.set_stream(stream.stream);
-    rng.set_word_pos(stream.word_position);
-    total.0 = total.0.wrapping_add(rng.next_u64());
-    stream.word_position = rng.get_word_pos();
+    let mut random_number_generator = ChaCha8Rng::seed_from_u64(stream.seed);
+    random_number_generator.set_stream(stream.stream);
+    random_number_generator.set_word_pos(stream.word_position);
+    total.0 = total.0.wrapping_add(random_number_generator.next_u64());
+    stream.word_position = random_number_generator.get_word_pos();
 }
 
 fn count_alpha_entered(mut entered: ResMut<AlphaEntered>) {
@@ -116,7 +116,7 @@ fn round_trip_gives_identical_text_and_keeps_references() {
     world.spawn((Saved, Marker(2), ChildOf(holder)));
 
     let first = save_world_to_string(world).unwrap();
-    load_world_from_str(world, &first).unwrap();
+    load_world_from_string(world, &first).unwrap();
     let second = save_world_to_string(world).unwrap();
     assert_eq!(first, second);
 
@@ -150,7 +150,7 @@ fn loading_restores_the_random_stream_exactly() {
     }
     let recorded_total = app.world().resource::<Total>().0;
 
-    load_world_from_str(app.world_mut(), &saved).unwrap();
+    load_world_from_string(app.world_mut(), &saved).unwrap();
     for _ in 0..5 {
         app.update();
     }
@@ -169,7 +169,7 @@ fn schema_mismatch_is_refused_and_leaves_the_world_unchanged() {
 
     world.spawn((Saved, Marker(6)));
     let before = save_world_to_string(world).unwrap();
-    let result = load_world_from_str(world, &tampered);
+    let result = load_world_from_string(world, &tampered);
     let after = save_world_to_string(world).unwrap();
 
     assert!(matches!(result, Err(SaveStateError::SchemaMismatch { .. })));
@@ -195,7 +195,7 @@ fn disabled_saved_entities_come_back_disabled_without_duplicates() {
     world.spawn((Saved, Marker(3), Disabled));
     let first = save_world_to_string(world).unwrap();
 
-    load_world_from_str(world, &first).unwrap();
+    load_world_from_string(world, &first).unwrap();
 
     let mut markers = world.query_filtered::<(&Marker, Has<Disabled>), Allow<Disabled>>();
     let found: Vec<_> = markers.iter(world).collect();
@@ -216,7 +216,7 @@ fn load_with_a_missing_next_state_fails_and_leaves_saved_entities_intact() {
     let world = app.world_mut();
     world.spawn((Saved, Marker(2)));
     world.remove_resource::<NextState<Phase>>();
-    let result = load_world_from_str(world, &saved);
+    let result = load_world_from_string(world, &saved);
 
     assert!(matches!(
         result,
@@ -237,7 +237,7 @@ fn non_saved_children_are_dropped_and_saves_stay_identical() {
     let first = save_world_to_string(world).unwrap();
     assert_eq!(first, save_world_to_string(world).unwrap());
 
-    load_world_from_str(world, &first).unwrap();
+    load_world_from_string(world, &first).unwrap();
 
     assert_eq!(first, save_world_to_string(world).unwrap());
     let mut parents = world.query::<(&Marker, &Children)>();
@@ -256,7 +256,7 @@ fn saved_resources_missing_from_the_file_are_removed_on_load() {
     let saved_without_score = save_world_to_string(world).unwrap();
     world.insert_resource(Score(5));
 
-    load_world_from_str(world, &saved_without_score).unwrap();
+    load_world_from_string(world, &saved_without_score).unwrap();
 
     assert!(world.get_resource::<Score>().is_none());
 }
@@ -305,7 +305,7 @@ fn loading_a_saved_state_does_not_rerun_on_enter() {
     app.update();
     assert_eq!(*app.world().resource::<State<Phase>>().get(), Phase::Beta);
 
-    load_world_from_str(app.world_mut(), &saved).unwrap();
+    load_world_from_string(app.world_mut(), &saved).unwrap();
     app.update();
     assert_eq!(*app.world().resource::<State<Phase>>().get(), Phase::Alpha);
     assert_eq!(app.world().resource::<AlphaEntered>().0, 1);

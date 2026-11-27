@@ -98,7 +98,7 @@ pub fn save_world_to_string(world: &mut World) -> Result<String, SaveStateError>
 /// # Errors
 /// Fails on a malformed file, a version or schema mismatch, a type in the file that cannot be
 /// written back, or a registered saved state whose `NextState` is missing.
-pub fn load_world_from_str(world: &mut World, text: &str) -> Result<(), SaveStateError> {
+pub fn load_world_from_string(world: &mut World, text: &str) -> Result<(), SaveStateError> {
     let saved_types = required_resource::<SavedTypes>(world)?.clone();
     let app_registry = required_resource::<AppTypeRegistry>(world)?.clone();
     let registry = app_registry.read();
@@ -143,7 +143,7 @@ pub fn save_world_to_file(world: &mut World, path: &Path) -> Result<(), SaveStat
     })
 }
 
-/// Reads a file and restores the world with [`load_world_from_str`].
+/// Reads a file and restores the world with [`load_world_from_string`].
 ///
 /// # Errors
 /// Fails when the file cannot be read or loading fails.
@@ -152,14 +152,16 @@ pub fn load_world_from_file(world: &mut World, path: &Path) -> Result<(), SaveSt
         path: path.to_path_buf(),
         source,
     })?;
-    load_world_from_str(world, &text)
+    load_world_from_string(world, &text)
 }
 
-fn required_resource<R: Resource>(world: &World) -> Result<&R, SaveStateError> {
+fn required_resource<ResourceType: Resource>(
+    world: &World,
+) -> Result<&ResourceType, SaveStateError> {
     world
-        .get_resource::<R>()
+        .get_resource::<ResourceType>()
         .ok_or(SaveStateError::MissingResource {
-            resource_name: std::any::type_name::<R>(),
+            resource_name: std::any::type_name::<ResourceType>(),
         })
 }
 
@@ -372,9 +374,11 @@ fn represented_registration<'a>(
     registry.get(info.type_id()).ok_or_else(unloadable)
 }
 
-fn require_type_data<T: TypeData>(registration: &TypeRegistration) -> Result<(), SaveStateError> {
+fn require_type_data<DataType: TypeData>(
+    registration: &TypeRegistration,
+) -> Result<(), SaveStateError> {
     registration
-        .data::<T>()
+        .data::<DataType>()
         .map(|_| ())
         .ok_or_else(|| SaveStateError::UnloadableType {
             type_path: registration.type_info().type_path().to_owned(),

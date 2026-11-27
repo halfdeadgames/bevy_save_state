@@ -43,7 +43,7 @@ impl NestedType {
 
 /// Hashes every saved component and resource type, and every type nested inside them.
 ///
-/// Saved states are covered because their `State<S>` resource is a saved resource.
+/// Saved states are covered because their `State<StateType>` resource is a saved resource.
 pub(crate) fn compute_schema_fingerprint(
     saved_types: &SavedTypes,
     registry: &TypeRegistry,
